@@ -23,7 +23,7 @@ CLICKUP_API_TOKEN = "pk_3584532_E4V1FGDN3ZFQWWGP03YTJ1DKORXAZXGL"  # <- replace 
 TEAM_ID = "37274194"                              # <- replace with your team/workspace ID
 
 # Optional: path to Echt logo PNG (or leave as None)
-LOGO_PATH = "echt_logo.png"  # put the PNG in the same folder as this script, or set to None
+LOGO_PATH = None 
 
 PRIORITY_ORDER: Dict[Optional[str], int] = {
     "urgent": 1,
