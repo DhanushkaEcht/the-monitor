@@ -16,6 +16,12 @@ from reportlab.pdfgen import canvas
 from reportlab.lib import colors
 from reportlab.lib.utils import ImageReader
 
+# =======================================
+# CONFIG – PUT YOUR DETAILS HERE
+# =======================================
+CLICKUP_API_TOKEN = "pk_3584532_E4V1FGDN3ZFQWWGP03YTJ1DKORXAZXGL"  # <- replace with your token
+TEAM_ID = "37274194"                              # <- replace with your team/workspace ID
+
 # Optional: path to Echt logo PNG (or leave as None)
 LOGO_PATH = None
 
