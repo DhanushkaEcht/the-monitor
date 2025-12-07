@@ -1374,7 +1374,7 @@ def build_pdf_report(
 
                 url = str(trow.get("url", "") or "")
                 if url:
-                    # Show only the word "Link" but make it clickable
+                    # Only show the clickable word “Link”
                     link_cell = Paragraph(
                         f'<link href="{url}" color="blue">Link</link>',
                         styles["Small"],
@@ -1383,7 +1383,6 @@ def build_pdf_report(
                     link_cell = Paragraph("", styles["Small"])
 
                 tbl_data.append([lst_name, tname, due_str, f"{days_over}", link_cell])
-
 
             od_tbl = Table(
                 tbl_data,
@@ -1403,6 +1402,7 @@ def build_pdf_report(
                     ]
                 )
             )
+
             card_flows.append(Paragraph("Overdue tasks for this assignee", styles["Small"]))
             card_flows.append(od_tbl)
             card_flows.append(Spacer(1, 3 * mm))
