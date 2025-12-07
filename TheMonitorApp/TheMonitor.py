@@ -770,11 +770,17 @@ def to_excel_bytes(df: pd.DataFrame) -> bytes:
     output.seek(0)
     return output.getvalue()
 # =======================================
-# PDF REPORT GENERATION (DESIGN-FOCUSED)
+# PDF REPORT GENERATION (NEW DASHBOARD DESIGN)
 # =======================================
 
+# Optional: embed Poppins in the PDF if you add the font files to your repo.
+# Leave these as None if you don't have the TTFs yet – it will fall back to Helvetica.
+POPPINS_REGULAR_TTF = None  # e.g. "fonts/Poppins-Regular.ttf"
+POPPINS_SEMIBOLD_TTF = None  # e.g. "fonts/Poppins-SemiBold.ttf"
+POPPINS_BOLD_TTF = None  # e.g. "fonts/Poppins-Bold.ttf"
+
+
 def _rate_color(rate: float) -> "colors.Color":
-    from reportlab.lib import colors
     rate = max(0.0, min(1.0, float(rate)))
     if rate == 0:
         return colors.HexColor("#16a34a")  # green
@@ -840,6 +846,30 @@ def _compute_top_and_bottom(people_summary: pd.DataFrame) -> Tuple[pd.DataFrame,
     return top3, bottom3
 
 
+def _unanswered_summary(unanswered_df: Optional[pd.DataFrame]) -> pd.DataFrame:
+    """Per-assignee unanswered summary for the 'Page A' questions overview."""
+    if unanswered_df is None or unanswered_df.empty:
+        return pd.DataFrame(columns=["assignee", "unanswered_count", "avg_age_days"])
+
+    df = unanswered_df.copy()
+    if "assignee" not in df.columns:
+        return pd.DataFrame(columns=["assignee", "unanswered_count", "avg_age_days"])
+
+    df = df[df["assignee"].notnull()]
+    if df.empty:
+        return pd.DataFrame(columns=["assignee", "unanswered_count", "avg_age_days"])
+
+    summary = (
+        df.groupby("assignee")
+        .agg(
+            unanswered_count=("task_id", "nunique"),
+            avg_age_days=("latest_comment_age_days", "mean"),
+        )
+        .reset_index()
+    )
+    return summary
+
+
 def build_pdf_report(
     df_view: pd.DataFrame,
     people_summary: pd.DataFrame,
@@ -851,15 +881,19 @@ def build_pdf_report(
     active_members: Optional[Set[str]] = None,
 ) -> bytes:
     """
-    Build a multi-page PDF report with a designed layout:
+    Build a multi-page PDF report with a modern dashboard layout:
 
-    - Strong cover page in Echt style
-    - Team overview + zero-task people
-    - Unanswered questions (List • Comment • Date)
-    - Per-assignee cards with health bars & neat separators
+    - Cover page with full-page gradient and centered title
+    - Team overview page with metric cards in gradient-style boxes
+    - Unanswered questions summary page (per assignee)
+    - Per-assignee cards (kept on a single page), including:
+        * Metrics
+        * Overdue task list
+        * Unanswered questions list (for that assignee)
+        * Manager summary
     - Top 3 vs Bottom 3 comparison page
-    - Busiest person page (status breakdown)
-    - Beautiful leaderboard page with crown for top performer
+    - Top 3 busiest assignees page
+    - Leaderboard page with coloured rows (gold/green/red)
     - Final motivational message
     """
     from reportlab.platypus import (
@@ -872,25 +906,34 @@ def build_pdf_report(
         Image,
         Flowable,
         HRFlowable,
+        KeepTogether,
     )
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib import colors
     from reportlab.lib.units import mm
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
 
-    # Optional: register Poppins fonts if paths are provided
-    if POPPINS_REGULAR_TTF or POPPINS_BOLD_TTF:
-        try:
-            from reportlab.pdfbase import pdfmetrics
-            from reportlab.pdfbase.ttfonts import TTFont
+    # ---------------------------------------
+    # FONT SETUP (Poppins if available, else Helvetica)
+    # ---------------------------------------
+    base_font = "Helvetica"
+    base_font_bold = "Helvetica-Bold"
 
-            if POPPINS_REGULAR_TTF:
-                pdfmetrics.registerFont(TTFont("Poppins", POPPINS_REGULAR_TTF))
-            if POPPINS_BOLD_TTF:
-                pdfmetrics.registerFont(TTFont("Poppins-Bold", POPPINS_BOLD_TTF))
-        except Exception:
-            # Fallback silently to default fonts if registration fails
-            pass
+    try:
+        if POPPINS_REGULAR_TTF:
+            pdfmetrics.registerFont(TTFont("Poppins", POPPINS_REGULAR_TTF))
+            base_font = "Poppins"
+        if POPPINS_SEMIBOLD_TTF:
+            pdfmetrics.registerFont(TTFont("Poppins-SemiBold", POPPINS_SEMIBOLD_TTF))
+            base_font_bold = "Poppins-SemiBold"
+        if POPPINS_BOLD_TTF:
+            pdfmetrics.registerFont(TTFont("Poppins-Bold", POPPINS_BOLD_TTF))
+            base_font_bold = "Poppins-Bold"
+    except Exception:
+        # If anything goes wrong, just fall back silently
+        base_font = "Helvetica"
+        base_font_bold = "Helvetica-Bold"
 
     buffer = io.BytesIO()
 
@@ -904,17 +947,13 @@ def build_pdf_report(
     )
 
     styles = getSampleStyleSheet()
-    # Base font name depending on whether Poppins is registered
-    base_font = "Poppins" if "Poppins" in styles["Normal"].fontName or POPPINS_REGULAR_TTF else "Helvetica"
-    base_bold = "Poppins-Bold" if POPPINS_BOLD_TTF else "Helvetica-Bold"
-
     styles.add(
         ParagraphStyle(
             name="EchtTitle",
             parent=styles["Heading1"],
-            fontName=base_bold,
-            fontSize=24,
-            leading=28,
+            fontName=base_font_bold,
+            fontSize=26,
+            leading=30,
             textColor=colors.white,
             alignment=1,  # center
         )
@@ -924,8 +963,8 @@ def build_pdf_report(
             name="EchtSubtitle",
             parent=styles["BodyText"],
             fontName=base_font,
-            fontSize=11,
-            leading=14,
+            fontSize=12,
+            leading=16,
             textColor=colors.HexColor("#e5e7eb"),
             alignment=1,
         )
@@ -934,12 +973,12 @@ def build_pdf_report(
         ParagraphStyle(
             name="EchtSection",
             parent=styles["Heading2"],
-            fontName=base_bold,
-            fontSize=15,
-            leading=18,
+            fontName=base_font_bold,
+            fontSize=16,
+            leading=20,
             textColor=colors.HexColor("#0f172a"),
             spaceBefore=6,
-            spaceAfter=6,
+            spaceAfter=8,
         )
     )
     styles.add(
@@ -948,7 +987,7 @@ def build_pdf_report(
             parent=styles["BodyText"],
             fontName=base_font,
             textColor=colors.HexColor("#6b7280"),
-            fontSize=8.5,
+            fontSize=9,
         )
     )
     styles.add(
@@ -956,85 +995,86 @@ def build_pdf_report(
             name="Small",
             parent=styles["BodyText"],
             fontName=base_font,
-            fontSize=9,
-            leading=11,
+            fontSize=9.5,
+            leading=12,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="CardLabel",
+            parent=styles["BodyText"],
+            fontName=base_font_bold,
+            fontSize=8,
+            textColor=colors.HexColor("#e5e7eb"),
+            leading=10,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="CardValue",
+            parent=styles["BodyText"],
+            fontName=base_font_bold,
+            fontSize=14,
+            textColor=colors.white,
+            leading=16,
         )
     )
 
     teal = colors.HexColor("#19b3b1")
-    teal_light = colors.HexColor("#67e8f9")
-    dark_bg = colors.HexColor("#020617")
-    dark_teal = colors.HexColor("#0b4b63")
+    teal_dark = colors.HexColor("#0b4b63")
+    teal_soft = colors.HexColor("#67e8f9")
+    slate_900 = colors.HexColor("#020617")
+    slate_800 = colors.HexColor("#0f172a")
+    slate_200 = colors.HexColor("#e5e7eb")
 
     Story: List = []
 
     # ---------------------------------------
-    # COVER PAGE
+    # COVER PAGE (full-page gradient, centered text)
     # ---------------------------------------
 
-    class CoverBanner(Flowable):
-        def __init__(self, height=70 * mm):
-            Flowable.__init__(self)
-            self.height = height
+    # We'll use onFirstPage callback to draw the gradient background.
+    def _draw_cover_background(canvas_obj, doc_obj):
+        canvas_obj.saveState()
+        width, height = A4
 
-        def draw(self):
-            c = self.canv
-            w = doc.width
-            h = self.height
-            # Background block
-            c.saveState()
-            c.setFillColor(dark_bg)
-            c.rect(0, 0, w, h, fill=1, stroke=0)
-            # Accent diagonal band
-            c.setFillColor(teal)
-            c.rect(0, 0, w * 0.65, h * 0.55, fill=1, stroke=0)
-            c.setFillColor(dark_teal)
-            c.rect(w * 0.35, h * 0.25, w * 0.65, h * 0.4, fill=1, stroke=0)
-            c.restoreState()
+        # Simple vertical gradient from dark slate to teal
+        start_col = slate_900
+        end_col = teal_dark
 
-    Story.append(CoverBanner())
-    Story.append(Spacer(1, 10))
+        steps = 60
+        for i in range(steps):
+            t = i / float(steps - 1)
+            r = start_col.red + (end_col.red - start_col.red) * t
+            g = start_col.green + (end_col.green - start_col.green) * t
+            b = start_col.blue + (end_col.blue - start_col.blue) * t
+            canvas_obj.setFillColor(colors.Color(r, g, b))
+            y = (height / steps) * i
+            canvas_obj.rect(0, y, width, height / steps + 1, stroke=0, fill=1)
 
-    Story.append(Paragraph("Echt • The Monitor", styles["EchtTitle"]))
-    Story.append(Spacer(1, 4))
-    Story.append(
-        Paragraph(
-            "Team Delivery & Discipline Report",
-            styles["EchtSubtitle"],
-        )
-    )
-    Story.append(Spacer(1, 10))
+        canvas_obj.restoreState()
 
-    Story.append(
-        Paragraph(
-            f"{timeframe_label}<br/>{generated_label}",
-            styles["EchtSubtitle"],
-        )
-    )
-    Story.append(Spacer(1, 12))
+    # Add centered title + labels (content is positioned via spacers)
+    Story.append(Spacer(1, 70 * mm))
+    Story.append(Paragraph("Operations Report", styles["EchtTitle"]))
+    Story.append(Spacer(1, 6 * mm))
 
-    # Logo on the cover
-    if LOGO_PATH:
-        try:
-            img = Image(LOGO_PATH, width=32 * mm, height=32 * mm)
-            img.hAlign = "CENTER"
-            Story.append(img)
-            Story.append(Spacer(1, 8))
-        except Exception:
-            pass
+    # Convert labels into simpler cover lines
+    # timeframe_label: "Reporting period: X – Y"
+    # generated_label: "Generated on: DD MMM YYYY, HH:MM"
+    # We want:
+    #   Generated on <date/time>
+    #   Reporting period <dates>
+    gen_text = generated_label.replace("Generated on:", "Generated on").strip()
+    tf_text = timeframe_label.replace("Reporting period:", "Reporting period").strip()
 
-    Story.append(
-        Paragraph(
-            "This report highlights how tasks are being delivered, "
-            "who is staying disciplined with timelines and communication, "
-            "and where support or process tightening is needed.",
-            styles["Small"],
-        )
-    )
+    Story.append(Paragraph(gen_text, styles["EchtSubtitle"]))
+    Story.append(Spacer(1, 2 * mm))
+    Story.append(Paragraph(tf_text, styles["EchtSubtitle"]))
     Story.append(PageBreak())
 
     # ---------------------------------------
-    # TEAM OVERVIEW (with zero-task people)
+    # TEAM OVERVIEW PAGE (metric cards)
     # ---------------------------------------
 
     Story.append(Paragraph("Team overview", styles["EchtSection"]))
@@ -1051,33 +1091,61 @@ def build_pdf_report(
     urgent = int(df_view["priority_lower"].eq("urgent").sum())
     total_changes = int(df_view["change_count"].sum())
 
-    overview_data = [
-        ["Metric", "Value", "Metric", "Value"],
-        ["Tasks in scope", total_tasks, "Overdue tasks", overdue_tasks],
-        ["Due in ≤3 days", due_3, "Urgent tasks", urgent],
-        ["Total due-date changes", total_changes, "", ""],
+    # Metric cards in a dashboard grid
+    def _metric_card(label: str, value: str, bg_from: colors.Color, bg_to: colors.Color):
+        # Fake gradient by using two stacked cells with slightly different colours
+        data = [
+            [Paragraph(label.upper(), styles["CardLabel"])],
+            [Paragraph(str(value), styles["CardValue"])],
+        ]
+        tbl = Table(data, colWidths=[doc.width / 3.4])
+        tbl.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (0, 0), bg_from),
+                    ("BACKGROUND", (0, 1), (0, 1), bg_to),
+                    ("BOX", (0, 0), (-1, -1), 0.4, colors.Color(1, 1, 1, alpha=0.18)),
+                    ("INNERGRID", (0, 0), (-1, -1), 0.0, colors.white),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ]
+            )
+        )
+        return tbl
+
+    cards_row1 = [
+        _metric_card("Tasks in scope", total_tasks, teal_dark, teal),
+        _metric_card("Overdue", overdue_tasks, colors.HexColor("#b91c1c"), colors.HexColor("#ef4444")),
+        _metric_card("Due in ≤3 days", due_3, colors.HexColor("#1e293b"), colors.HexColor("#0ea5e9")),
+    ]
+    cards_row2 = [
+        _metric_card("Urgent tasks", urgent, colors.HexColor("#4f46e5"), colors.HexColor("#6366f1")),
+        _metric_card("Due-date changes", total_changes, colors.HexColor("#111827"), colors.HexColor("#6b7280")),
     ]
 
-    overview_tbl = Table(
-        overview_data,
-        colWidths=[55 * mm, 25 * mm, 55 * mm, 25 * mm],
+    # Layout: first row has 3 cards, second row has 2 centered
+    grid_data = [cards_row1, ["", ""]]
+    grid_table = Table(
+        grid_data,
+        colWidths=[doc.width / 3.4, doc.width / 3.4, doc.width / 3.4],
+        hAlign="LEFT",
     )
-    overview_tbl.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), dark_bg),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                ("FONTNAME", (0, 0), (-1, 0), base_bold),
-                ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
-                ("FONTNAME", (0, 1), (-1, -1), base_font),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.white]),
-                ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#e5e7eb")),
-                ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e5e7eb")),
-            ]
-        )
+    grid_table.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
+
+    Story.append(grid_table)
+    Story.append(Spacer(1, 6 * mm))
+
+    # Second row as separate centered table
+    grid2 = Table(
+        [[cards_row2[0], cards_row2[1]]],
+        colWidths=[doc.width / 3.4, doc.width / 3.4],
+        hAlign="LEFT",
     )
-    Story.append(overview_tbl)
-    Story.append(Spacer(1, 10))
+    grid2.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
+    Story.append(grid2)
+    Story.append(Spacer(1, 6 * mm))
 
     # People with no tasks this period (from active_members)
     if active_members:
@@ -1100,11 +1168,11 @@ def build_pdf_report(
                 styles["Muted"],
             )
         )
-        Story.append(Spacer(1, 6))
+        Story.append(Spacer(1, 4 * mm))
 
-    # Single big progress bar
+    # Big progress bar towards 0 overdue
     Story.append(Paragraph("Progress towards 0 overdue tasks", styles["Small"]))
-    Story.append(Spacer(1, 3))
+    Story.append(Spacer(1, 2 * mm))
 
     class BigProgressBar(Flowable):
         def __init__(self, width, height, overdue, total):
@@ -1134,46 +1202,48 @@ def build_pdf_report(
     Story.append(PageBreak())
 
     # ---------------------------------------
-    # UNANSWERED QUESTIONS PAGE
+    # UNANSWERED QUESTIONS SUMMARY PAGE (PAGE A)
     # ---------------------------------------
 
-    Story.append(Paragraph("Unanswered questions in ClickUp comments", styles["EchtSection"]))
+    Story.append(Paragraph("Unanswered questions – summary", styles["EchtSection"]))
     Story.append(
         Paragraph(
-            "Only comments containing a question mark ('?') are treated as questions. "
-            "Below are lists where questions are still waiting for a response from the assignee.",
+            "This page shows how many ClickUp questions (comments containing '?') are still waiting for a reply from each assignee, "
+            "and the average age of those questions in days.",
             styles["Small"],
         )
     )
-    Story.append(Spacer(1, 6))
+    Story.append(Spacer(1, 4 * mm))
 
-    if unanswered_df is not None and not unanswered_df.empty:
-        # We only show: assignee, list, question, date
-        tmp = unanswered_df.copy()
-        cols_needed = ["assignee", "list", "latest_comment_text", "latest_comment_date"]
-        for c in cols_needed:
-            if c not in tmp.columns:
-                tmp[c] = None
+    unanswered_summary_df = _unanswered_summary(unanswered_df)
 
-        table_data = [["Assignee", "List", "Question", "Date"]]
-        for _, row in tmp.sort_values("latest_comment_age_days", ascending=False).iterrows():
-            assignee = str(row.get("assignee", "") or "")
-            lst_name = str(row.get("list", "") or "")
-            question = _truncate(row.get("latest_comment_text", ""), 100)
-            q_date = str(row.get("latest_comment_date", "") or "")
-            table_data.append([assignee, lst_name, question, q_date])
+    if unanswered_summary_df.empty:
+        Story.append(Paragraph("No unanswered questions for this period.", styles["Small"]))
+    else:
+        unanswered_summary_df = unanswered_summary_df.sort_values(
+            ["unanswered_count", "avg_age_days"], ascending=[False, False]
+        )
+        rows = [["Assignee", "Unanswered questions", "Avg age (days)"]]
+        for _, r in unanswered_summary_df.iterrows():
+            rows.append(
+                [
+                    str(r["assignee"]),
+                    int(r["unanswered_count"]),
+                    f"{float(r['avg_age_days']):.1f}" if pd.notnull(r["avg_age_days"]) else "",
+                ]
+            )
 
         q_tbl = Table(
-            table_data,
-            colWidths=[30 * mm, 35 * mm, 80 * mm, 25 * mm],
+            rows,
+            colWidths=[70 * mm, 45 * mm, 35 * mm],
             repeatRows=1,
         )
         q_tbl.setStyle(
             TableStyle(
                 [
-                    ("BACKGROUND", (0, 0), (-1, 0), dark_bg),
+                    ("BACKGROUND", (0, 0), (-1, 0), slate_900),
                     ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                    ("FONTNAME", (0, 0), (-1, 0), base_bold),
+                    ("FONTNAME", (0, 0), (-1, 0), base_font_bold),
                     ("FONTSIZE", (0, 0), (-1, 0), 9),
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
                     ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.white]),
@@ -1183,24 +1253,22 @@ def build_pdf_report(
             )
         )
         Story.append(q_tbl)
-    else:
-        Story.append(Paragraph("No unanswered questions for this period.", styles["Small"]))
 
     Story.append(PageBreak())
 
     # ---------------------------------------
-    # PER-ASSIGNEE CARDS (MULTI-PER-PAGE)
+    # PER-ASSIGNEE CARDS (KEPT TOGETHER)
     # ---------------------------------------
 
     Story.append(Paragraph("Per-assignee performance", styles["EchtSection"]))
     Story.append(
         Paragraph(
-            "Each card summarises overdue tasks, unanswered questions, and due-date changes "
-            "for a team member in this period.",
+            "Each card summarises overdue tasks, unanswered questions, and due-date changes for a team member in this period, "
+            "plus their specific overdue items and unanswered questions.",
             styles["Small"],
         )
     )
-    Story.append(Spacer(1, 4))
+    Story.append(Spacer(1, 4 * mm))
 
     per_df = people_summary.sort_values("assignee").copy()
 
@@ -1219,8 +1287,18 @@ def build_pdf_report(
             c.setFillColor(_rate_color(self.rate))
             c.roundRect(0, 0, self.width * self.rate, self.height, radius, stroke=0, fill=1)
 
-    for idx, row in per_df.iterrows():
+    # Pre-index unanswered questions per assignee (Page B: details)
+    unanswered_by_assignee: Dict[str, pd.DataFrame] = {}
+    if unanswered_df is not None and not unanswered_df.empty:
+        for assignee, group in unanswered_df.groupby("assignee"):
+            unanswered_by_assignee[str(assignee)] = group.copy()
+
+    for _, row in per_df.iterrows():
         a = row["assignee"]
+        if pd.isna(a):
+            continue
+        a_str = str(a)
+
         tasks = max(int(row["tasks_total"]), 0)
         overdue = int(row["overdue_tasks"])
         changes = int(row["change_total"])
@@ -1228,46 +1306,49 @@ def build_pdf_report(
         overdue_rate = float(row["overdue_rate"])
         unanswered_rate = float(row["unanswered_rate"])
 
-        note = person_notes.get(a, auto_feedback_for_person(row))
+        note = person_notes.get(a_str, auto_feedback_for_person(row))
 
-        Story.append(Paragraph(f"<b>{a}</b>", styles["Small"]))
-        Story.append(
+        # Build the card content as a list of flowables, then wrap in KeepTogether
+        card_flows: List[Flowable] = []
+
+        card_flows.append(Paragraph(f"<b>{a_str}</b>", styles["Small"]))
+        card_flows.append(
             Paragraph(
                 f"{tasks} task(s) in this reporting period.",
                 styles["Muted"],
             )
         )
-        Story.append(Spacer(1, 2))
+        card_flows.append(Spacer(1, 2 * mm))
 
         # Overdue health bar
-        Story.append(Paragraph("Overdue tasks", styles["Small"]))
-        Story.append(HealthBar(doc.width, 5 * mm, overdue_rate))
-        Story.append(
+        card_flows.append(Paragraph("Overdue tasks", styles["Small"]))
+        card_flows.append(HealthBar(doc.width, 5 * mm, overdue_rate))
+        card_flows.append(
             Paragraph(
                 f"{overdue} overdue task(s) • {overdue_rate:.0%} of their workload.",
                 styles["Muted"],
             )
         )
-        Story.append(Spacer(1, 2))
+        card_flows.append(Spacer(1, 2 * mm))
 
         # Unanswered health bar
-        Story.append(Paragraph("Unanswered questions", styles["Small"]))
-        Story.append(HealthBar(doc.width, 5 * mm, unanswered_rate))
-        Story.append(
+        card_flows.append(Paragraph("Unanswered questions", styles["Small"]))
+        card_flows.append(HealthBar(doc.width, 5 * mm, unanswered_rate))
+        card_flows.append(
             Paragraph(
                 f"{unanswered} unanswered question(s) • {unanswered_rate:.0%} of their tasks.",
                 styles["Muted"],
             )
         )
-        Story.append(Spacer(1, 2))
+        card_flows.append(Spacer(1, 2 * mm))
 
-        Story.append(
+        card_flows.append(
             Paragraph(
                 f"Due-date changes: <b>{changes}</b> in this period.",
                 styles["Small"],
             )
         )
-        Story.append(Spacer(1, 3))
+        card_flows.append(Spacer(1, 4 * mm))
 
         # Short list of this person's overdue tasks (with blue hyperlinks)
         person_overdue = df_view[
@@ -1275,9 +1356,9 @@ def build_pdf_report(
         ].copy()
 
         if not person_overdue.empty:
-            tbl_data = [["Client", "Task", "Due", "Days overdue", "Link"]]
+            tbl_data = [["List", "Task", "Due", "Days overdue", "Link"]]
             for _, trow in person_overdue.sort_values("due_date").iterrows():
-                client = str(trow.get("client", "") or "")
+                lst_name = str(trow.get("list", "") or "")
                 tname = _truncate(trow.get("task_name", ""), 50)
                 due_val = trow.get("due_date", "")
                 if isinstance(due_val, (pd.Timestamp, date)):
@@ -1293,18 +1374,18 @@ def build_pdf_report(
                     link_html = f'<link href="{url}" color="blue">Open</link>'
                 else:
                     link_html = ""
-                tbl_data.append([client, tname, due_str, f"{days_over}", link_html])
+                tbl_data.append([lst_name, tname, due_str, f"{days_over}", link_html])
 
             od_tbl = Table(
                 tbl_data,
-                colWidths=[32 * mm, 60 * mm, 23 * mm, 23 * mm, 25 * mm],
+                colWidths=[30 * mm, 60 * mm, 23 * mm, 23 * mm, 25 * mm],
             )
             od_tbl.setStyle(
                 TableStyle(
                     [
-                        ("BACKGROUND", (0, 0), (-1, 0), dark_bg),
+                        ("BACKGROUND", (0, 0), (-1, 0), slate_900),
                         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                        ("FONTNAME", (0, 0), (-1, 0), base_bold),
+                        ("FONTNAME", (0, 0), (-1, 0), base_font_bold),
                         ("FONTSIZE", (0, 0), (-1, 0), 8),
                         ("VALIGN", (0, 0), (-1, -1), "TOP"),
                         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.white]),
@@ -1313,40 +1394,91 @@ def build_pdf_report(
                     ]
                 )
             )
-            Story.append(od_tbl)
-            Story.append(Spacer(1, 3))
+            card_flows.append(Paragraph("Overdue tasks for this assignee", styles["Small"]))
+            card_flows.append(od_tbl)
+            card_flows.append(Spacer(1, 3 * mm))
+
+        # Unanswered questions for this assignee (Page B detail)
+        unanswered_person = unanswered_by_assignee.get(a_str)
+        if unanswered_person is not None and not unanswered_person.empty:
+            uq_rows = [["Task", "Question", "Asked by", "Date", "Link"]]
+            for _, q in unanswered_person.sort_values(
+                "latest_comment_age_days", ascending=False
+            ).iterrows():
+                tname = _truncate(q.get("task_name", ""), 40)
+                question = _truncate(q.get("latest_comment_text", ""), 70)
+                author = str(q.get("latest_comment_author", "") or "")
+                q_date = str(q.get("latest_comment_date", "") or "")
+                url = str(q.get("url", "") or "")
+                if url:
+                    link_html = f'<link href="{url}" color="blue">Open</link>'
+                else:
+                    link_html = ""
+                uq_rows.append([tname, question, author, q_date, link_html])
+
+            uq_tbl = Table(
+                uq_rows,
+                colWidths=[30 * mm, 70 * mm, 30 * mm, 22 * mm, 18 * mm],
+                repeatRows=1,
+            )
+            uq_tbl.setStyle(
+                TableStyle(
+                    [
+                        ("BACKGROUND", (0, 0), (-1, 0), slate_800),
+                        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                        ("FONTNAME", (0, 0), (-1, 0), base_font_bold),
+                        ("FONTSIZE", (0, 0), (-1, 0), 8),
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.white]),
+                        ("BOX", (0, 0), (-1, -1), 0.3, colors.HexColor("#e5e7eb")),
+                        ("GRID", (0, 0), (-1, -1), 0.2, colors.HexColor("#e5e7eb")),
+                    ]
+                )
+            )
+            card_flows.append(Paragraph("Unanswered ClickUp questions", styles["Small"]))
+            card_flows.append(uq_tbl)
+            card_flows.append(Spacer(1, 3 * mm))
 
         # Manager note / summary
-        Story.append(Paragraph("Summary & feedback", styles["Small"]))
-        Story.append(Paragraph(_truncate(note, 400), styles["Small"]))
-        Story.append(Spacer(1, 4))
+        card_flows.append(Paragraph("Summary & feedback", styles["Small"]))
+        card_flows.append(Paragraph(_truncate(note, 600), styles["Small"]))
+        card_flows.append(Spacer(1, 4 * mm))
 
-        # Neat separator bar
-        Story.append(
-            HRFlowable(
-                width="100%",
-                thickness=0.5,
-                color=colors.HexColor("#d1d5db"),
-                spaceBefore=4,
-                spaceAfter=8,
+        # Boxed horizontal bar as separator
+        sep_tbl = Table(
+            [[""]],
+            colWidths=[doc.width],
+            rowHeights=[4 * mm],
+        )
+        sep_tbl.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#e5e7eb")),
+                    ("BOX", (0, 0), (-1, -1), 0.0, colors.HexColor("#e5e7eb")),
+                ]
             )
         )
+        card_flows.append(sep_tbl)
+        card_flows.append(Spacer(1, 6 * mm))
 
-    # ---------------------------------------
-    # TOP 3 VS BOTTOM 3 PAGE
-    # ---------------------------------------
+        # Wrap entire card in KeepTogether so it doesn't break across pages
+        Story.append(KeepTogether(card_flows))
 
     Story.append(PageBreak())
+
+    # ---------------------------------------
+    # TOP 3 VS BOTTOM 3 PAGE (one page)
+    # ---------------------------------------
+
     Story.append(Paragraph("Top 3 vs Bottom 3", styles["EchtSection"]))
     Story.append(
         Paragraph(
-            "Top performers are those who keep work on time, avoid unnecessary due-date changes, "
-            "and clear questions quickly. Bottom performers have the highest combination of overdue work, "
-            "changes, and unanswered questions.",
+            "Top performers keep work on time, avoid unnecessary due-date changes, and clear questions quickly. "
+            "Bottom performers have the highest combination of overdue work, changes, and unanswered questions.",
             styles["Small"],
         )
     )
-    Story.append(Spacer(1, 6))
+    Story.append(Spacer(1, 5 * mm))
 
     top3, bottom3 = _compute_top_and_bottom(people_summary)
 
@@ -1367,17 +1499,14 @@ def build_pdf_report(
             )
 
         tbl = Table(rows, colWidths=[12 * mm, 45 * mm, 30 * mm, 35 * mm, 35 * mm])
-        if highlight_best:
-            header_bg = colors.HexColor("#022c22")
-        else:
-            header_bg = colors.HexColor("#450a0a")
+        header_bg = colors.HexColor("#022c22") if highlight_best else colors.HexColor("#450a0a")
 
         tbl.setStyle(
             TableStyle(
                 [
                     ("BACKGROUND", (0, 0), (-1, 0), header_bg),
                     ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                    ("FONTNAME", (0, 0), (-1, 0), base_bold),
+                    ("FONTNAME", (0, 0), (-1, 0), base_font_bold),
                     ("ALIGN", (0, 0), (-1, 0), "CENTER"),
                     ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.white]),
                     ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#e5e7eb")),
@@ -1387,100 +1516,84 @@ def build_pdf_report(
         )
         return tbl
 
-    col_left, col_right = [], []
     if not top3.empty:
-        col_left.append(Paragraph("Top 3 (on-time & responsive)", styles["Small"]))
-        col_left.append(_summary_table(top3, highlight_best=True))
-    if not bottom3.empty:
-        col_right.append(Paragraph("Bottom 3 (overdue & unresponsive)", styles["Small"]))
-        col_right.append(_summary_table(bottom3, highlight_best=False))
-
-    if col_left or col_right:
-        # Use a small 2-column layout via a table of flowables
-        wrapper = Table(
-            [
-                [col_left[0] if col_left else "", col_right[0] if col_right else ""],
-                [col_left[1] if len(col_left) > 1 else "", col_right[1] if len(col_right) > 1 else ""],
-            ],
-            colWidths=[(doc.width / 2) - 5 * mm, (doc.width / 2) - 5 * mm],
-        )
-        wrapper.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
-        Story.append(wrapper)
+        Story.append(Paragraph("Top 3 (strongest discipline)", styles["Small"]))
+        Story.append(_summary_table(top3, highlight_best=True))
+        Story.append(Spacer(1, 6 * mm))
     else:
-        Story.append(Paragraph("Not enough data to compute top and bottom performers.", styles["Small"]))
+        Story.append(Paragraph("Not enough data to compute top performers.", styles["Small"]))
+        Story.append(Spacer(1, 6 * mm))
+
+    if not bottom3.empty:
+        Story.append(Paragraph("Bottom 3 (weakest discipline)", styles["Small"]))
+        Story.append(_summary_table(bottom3, highlight_best=False))
+    else:
+        Story.append(Paragraph("Not enough data to compute bottom performers.", styles["Small"]))
+
+    Story.append(PageBreak())
 
     # ---------------------------------------
-    # BUSIEST PERSON PAGE
+    # TOP 3 BUSIEST ASSIGNEES PAGE
     # ---------------------------------------
 
     if not people_summary.empty:
-        busiest_row = people_summary.sort_values("tasks_total", ascending=False).iloc[0]
-        busiest_name = busiest_row["assignee"]
-        busiest_count = int(busiest_row["tasks_total"])
+        busiest_df = people_summary.sort_values("tasks_total", ascending=False).head(3)
 
+        Story.append(Paragraph("Busiest assignees", styles["EchtSection"]))
+        Story.append(
+            Paragraph(
+                "Top 3 team members by number of tasks in this reporting period.",
+                styles["Small"],
+            )
+        )
+        Story.append(Spacer(1, 5 * mm))
+
+        rows = [["Rank", "Assignee", "Tasks", "Overdue", "Due-date changes", "Unanswered questions"]]
+        for i, (_, r) in enumerate(busiest_df.iterrows(), start=1):
+            rows.append(
+                [
+                    i,
+                    str(r["assignee"]),
+                    int(r["tasks_total"]),
+                    int(r["overdue_tasks"]),
+                    int(r["change_total"]),
+                    int(r["unanswered_count"]),
+                ]
+            )
+
+        busy_tbl = Table(
+            rows,
+            colWidths=[12 * mm, 50 * mm, 25 * mm, 25 * mm, 35 * mm, 40 * mm],
+            repeatRows=1,
+        )
+        busy_tbl.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), slate_900),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("FONTNAME", (0, 0), (-1, 0), base_font_bold),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.white]),
+                    ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#e5e7eb")),
+                    ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e5e7eb")),
+                ]
+            )
+        )
+        Story.append(busy_tbl)
         Story.append(PageBreak())
-        Story.append(Paragraph("Busiest assignee", styles["EchtSection"]))
-        Story.append(
-            Paragraph(
-                f"{busiest_name} handled the highest number of tasks in this period.",
-                styles["Small"],
-            )
-        )
-        Story.append(Spacer(1, 4))
-
-        Story.append(
-            Paragraph(
-                f"Total tasks: <b>{busiest_count}</b><br/>"
-                f"Overdue tasks: <b>{int(busiest_row['overdue_tasks'])}</b><br/>"
-                f"Due-date changes: <b>{int(busiest_row['change_total'])}</b><br/>"
-                f"Unanswered questions: <b>{int(busiest_row['unanswered_count'])}</b>",
-                styles["Small"],
-            )
-        )
-        Story.append(Spacer(1, 8))
-
-        # Status breakdown table
-        status_df = _status_breakdown_for_person(df_view, busiest_name)
-        if not status_df.empty:
-            s_rows = [["Status", "Task count"]]
-            for _, r in status_df.iterrows():
-                s_rows.append([str(r["status"]), int(r["count"])])
-
-            s_tbl = Table(
-                s_rows,
-                colWidths=[80 * mm, 30 * mm],
-            )
-            s_tbl.setStyle(
-                TableStyle(
-                    [
-                        ("BACKGROUND", (0, 0), (-1, 0), dark_bg),
-                        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                        ("FONTNAME", (0, 0), (-1, 0), base_bold),
-                        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.white]),
-                        ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#e5e7eb")),
-                        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e5e7eb")),
-                    ]
-                )
-            )
-            Story.append(Paragraph("Status breakdown", styles["Small"]))
-            Story.append(s_tbl)
-        else:
-            Story.append(Paragraph("No detailed status breakdown available.", styles["Small"]))
 
     # ---------------------------------------
     # LEADERBOARD PAGE
     # ---------------------------------------
 
-    Story.append(PageBreak())
     Story.append(Paragraph("Leaderboard", styles["EchtSection"]))
     Story.append(
         Paragraph(
             "Ranked from strongest overall discipline (top) to weakest (bottom). "
-            "The top performer is crowned.",
+            "Colours highlight the very best and the weakest performers.",
             styles["Small"],
         )
     )
-    Story.append(Spacer(1, 4))
+    Story.append(Spacer(1, 4 * mm))
 
     lb = people_summary.copy()
     if not lb.empty:
@@ -1491,10 +1604,9 @@ def build_pdf_report(
         )
         lb = lb.sort_values("good_score", ascending=False).reset_index(drop=True)
 
-        rows = [["", "Assignee", "Score", "Overdue %", "Unanswered %", "Changes"]]
+        rows = [["#", "Assignee", "Score", "Overdue %", "Unanswered %", "Changes"]]
         for i, (_, r) in enumerate(lb.iterrows(), start=1):
-            crown = "👑" if i == 1 else ""
-            name = f"{crown} {r['assignee']}".strip()
+            name = str(r["assignee"])
             rows.append(
                 [
                     i,
@@ -1511,19 +1623,39 @@ def build_pdf_report(
             colWidths=[10 * mm, 55 * mm, 25 * mm, 25 * mm, 30 * mm, 25 * mm],
             repeatRows=1,
         )
-        lb_tbl.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, 0), dark_bg),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                    ("FONTNAME", (0, 0), (-1, 0), base_bold),
-                    ("ALIGN", (0, 0), (0, -1), "CENTER"),
-                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.white]),
-                    ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#e5e7eb")),
-                    ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e5e7eb")),
-                ]
-            )
-        )
+
+        # Base style
+        style_cmds = [
+            ("BACKGROUND", (0, 0), (-1, 0), slate_900),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), base_font_bold),
+            ("ALIGN", (0, 0), (0, -1), "CENTER"),
+            ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#e5e7eb")),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e5e7eb")),
+        ]
+
+        # Row colouring: top 1 gold, next few greenish, bottom 5 red
+        n_rows = len(rows) - 1  # excluding header
+        if n_rows > 0:
+            # Top performer (row index 1)
+            style_cmds.append(("BACKGROUND", (0, 1), (-1, 1), colors.HexColor("#facc15")))
+            style_cmds.append(("TEXTCOLOR", (0, 1), (-1, 1), colors.HexColor("#111827")))
+
+            # Next 2–4 performers (light green/teal)
+            for row_idx in range(2, min(1 + 4, n_rows) + 1):
+                style_cmds.append(
+                    ("BACKGROUND", (0, row_idx), (-1, row_idx), colors.HexColor("#bbf7d0"))
+                )
+
+            # Bottom 5 rows in red (if enough rows)
+            bottom_count = min(5, n_rows)
+            for offset in range(bottom_count):
+                row_idx = n_rows - offset + 0  # +0 because header is row 0
+                style_cmds.append(
+                    ("BACKGROUND", (0, row_idx), (-1, row_idx), colors.HexColor("#fee2e2"))
+                )
+
+        lb_tbl.setStyle(TableStyle(style_cmds))
         Story.append(lb_tbl)
     else:
         Story.append(Paragraph("No data to build a leaderboard.", styles["Small"]))
@@ -1544,9 +1676,12 @@ def build_pdf_report(
 
     Story.append(Paragraph(_truncate(motivation_text, 1500), styles["Small"]))
 
-    doc.build(Story)
+    # Build with cover background on first page only
+    doc.build(Story, onFirstPage=_draw_cover_background)
+
     buffer.seek(0)
     return buffer.read()
+
 # =======================================
 # STREAMLIT APP – THE MONITOR
 # =======================================
