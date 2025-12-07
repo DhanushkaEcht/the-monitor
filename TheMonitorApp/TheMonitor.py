@@ -1409,14 +1409,15 @@ def build_pdf_report(
 
         # Unanswered questions for this assignee (Page B detail)
         unanswered_person = unanswered_by_assignee.get(a_str)
-                if unanswered_person is not None and not unanswered_person.empty:
+        if unanswered_person is not None and not unanswered_person.empty:
             uq_rows = [["Task", "Question", "Asked by", "Date", "Link"]]
+
             for _, q in unanswered_person.sort_values(
                 "latest_comment_age_days", ascending=False
             ).iterrows():
                 tname = _truncate(q.get("task_name", ""), 40)
 
-                # Slightly longer but smaller-font question so it wraps nicely
+                # Smaller font & wrapped text for Question column
                 question_text = _truncate(q.get("latest_comment_text", ""), 120)
                 question_cell = Paragraph(question_text, styles["Small"])
 
@@ -1450,11 +1451,12 @@ def build_pdf_report(
                         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.white]),
                         ("BOX", (0, 0), (-1, -1), 0.3, colors.HexColor("#e5e7eb")),
                         ("GRID", (0, 0), (-1, -1), 0.2, colors.HexColor("#e5e7eb")),
-                        # Smaller font for body rows so questions fit inside cells
+                        # smaller font so question fits inside
                         ("FONTSIZE", (0, 1), (-1, -1), 8),
                     ]
                 )
             )
+
             card_flows.append(Paragraph("Unanswered ClickUp questions", styles["Small"]))
             card_flows.append(uq_tbl)
             card_flows.append(Spacer(1, 3 * mm))
