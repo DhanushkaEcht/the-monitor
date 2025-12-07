@@ -1360,21 +1360,30 @@ def build_pdf_report(
             for _, trow in person_overdue.sort_values("due_date").iterrows():
                 lst_name = str(trow.get("list", "") or "")
                 tname = _truncate(trow.get("task_name", ""), 50)
+
                 due_val = trow.get("due_date", "")
                 if isinstance(due_val, (pd.Timestamp, date)):
                     due_str = due_val.strftime("%Y-%m-%d")
                 else:
                     due_str = str(due_val or "")
+
                 if pd.notnull(trow["days_to_due"]) and trow["days_to_due"] < 0:
                     days_over = -int(trow["days_to_due"])
                 else:
                     days_over = ""
+
                 url = str(trow.get("url", "") or "")
                 if url:
-                    link_html = f'<link href="{url}" color="blue">Open</link>'
+                    # Show only the word "Link" but make it clickable
+                    link_cell = Paragraph(
+                        f'<link href="{url}" color="blue">Link</link>',
+                        styles["Small"],
+                    )
                 else:
-                    link_html = ""
-                tbl_data.append([lst_name, tname, due_str, f"{days_over}", link_html])
+                    link_cell = Paragraph("", styles["Small"])
+
+                tbl_data.append([lst_name, tname, due_str, f"{days_over}", link_cell])
+
 
             od_tbl = Table(
                 tbl_data,
@@ -1400,21 +1409,30 @@ def build_pdf_report(
 
         # Unanswered questions for this assignee (Page B detail)
         unanswered_person = unanswered_by_assignee.get(a_str)
-        if unanswered_person is not None and not unanswered_person.empty:
+                if unanswered_person is not None and not unanswered_person.empty:
             uq_rows = [["Task", "Question", "Asked by", "Date", "Link"]]
             for _, q in unanswered_person.sort_values(
                 "latest_comment_age_days", ascending=False
             ).iterrows():
                 tname = _truncate(q.get("task_name", ""), 40)
-                question = _truncate(q.get("latest_comment_text", ""), 70)
+
+                # Slightly longer but smaller-font question so it wraps nicely
+                question_text = _truncate(q.get("latest_comment_text", ""), 120)
+                question_cell = Paragraph(question_text, styles["Small"])
+
                 author = str(q.get("latest_comment_author", "") or "")
                 q_date = str(q.get("latest_comment_date", "") or "")
                 url = str(q.get("url", "") or "")
+
                 if url:
-                    link_html = f'<link href="{url}" color="blue">Open</link>'
+                    link_cell = Paragraph(
+                        f'<link href="{url}" color="blue">Link</link>',
+                        styles["Small"],
+                    )
                 else:
-                    link_html = ""
-                uq_rows.append([tname, question, author, q_date, link_html])
+                    link_cell = Paragraph("", styles["Small"])
+
+                uq_rows.append([tname, question_cell, author, q_date, link_cell])
 
             uq_tbl = Table(
                 uq_rows,
@@ -1432,6 +1450,8 @@ def build_pdf_report(
                         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.white]),
                         ("BOX", (0, 0), (-1, -1), 0.3, colors.HexColor("#e5e7eb")),
                         ("GRID", (0, 0), (-1, -1), 0.2, colors.HexColor("#e5e7eb")),
+                        # Smaller font for body rows so questions fit inside cells
+                        ("FONTSIZE", (0, 1), (-1, -1), 8),
                     ]
                 )
             )
