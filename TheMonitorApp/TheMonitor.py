@@ -1010,6 +1010,16 @@ def build_pdf_report(
         )
     )
     styles.add(
+    ParagraphStyle(
+        name="Tiny",
+        parent=styles["BodyText"],
+        fontSize=6,      # ~40% smaller than Small
+        leading=7,
+        textColor=colors.black,
+        )
+    )
+
+    styles.add(
         ParagraphStyle(
             name="CardValue",
             parent=styles["BodyText"],
@@ -1419,7 +1429,7 @@ def build_pdf_report(
 
                 # Smaller font & wrapped text for Question column
                 question_text = _truncate(q.get("latest_comment_text", ""), 120)
-                question_cell = Paragraph(question_text, styles["Small"])
+                question_cell = Paragraph(question_text, styles["Tiny"])
 
                 author = str(q.get("latest_comment_author", "") or "")
                 q_date = str(q.get("latest_comment_date", "") or "")
