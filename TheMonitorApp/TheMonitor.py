@@ -16,36 +16,6 @@ from reportlab.pdfgen import canvas
 from reportlab.lib import colors
 from reportlab.lib.utils import ImageReader
 
-# =======================================
-# CONFIG – PUT YOUR DETAILS HERE
-# =======================================
-CLICKUP_API_TOKEN = "pk_3584532_E4V1FGDN3ZFQWWGP03YTJ1DKORXAZXGL"  # <- replace with your token
-TEAM_ID = "37274194"                              # <- replace with your team/workspace ID
-
-from __future__ import annotations
-
-import io
-import requests
-import pandas as pd
-import streamlit as st
-from datetime import datetime, date, timezone, timedelta
-from typing import List, Optional, Tuple, Dict, Set
-import sqlite3
-from io import BytesIO
-from textwrap import wrap
-
-import plotly.express as px
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
-from reportlab.lib import colors
-from reportlab.lib.utils import ImageReader
-
-# =======================================
-# CONFIG – PUT YOUR DETAILS HERE
-# =======================================
-CLICKUP_API_TOKEN = "xxxx"  # <- replace with your token
-TEAM_ID = "xxxx"            # <- replace with your team/workspace ID
-
 # Optional: path to Echt logo PNG (or leave as None)
 LOGO_PATH = None
 
