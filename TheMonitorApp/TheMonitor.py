@@ -22,8 +22,36 @@ from reportlab.lib.utils import ImageReader
 CLICKUP_API_TOKEN = "pk_3584532_E4V1FGDN3ZFQWWGP03YTJ1DKORXAZXGL"  # <- replace with your token
 TEAM_ID = "37274194"                              # <- replace with your team/workspace ID
 
+from __future__ import annotations
+
+import io
+import requests
+import pandas as pd
+import streamlit as st
+from datetime import datetime, date, timezone, timedelta
+from typing import List, Optional, Tuple, Dict, Set
+import sqlite3
+from io import BytesIO
+from textwrap import wrap
+
+import plotly.express as px
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from reportlab.lib import colors
+from reportlab.lib.utils import ImageReader
+
+# =======================================
+# CONFIG – PUT YOUR DETAILS HERE
+# =======================================
+CLICKUP_API_TOKEN = "xxxx"  # <- replace with your token
+TEAM_ID = "xxxx"            # <- replace with your team/workspace ID
+
 # Optional: path to Echt logo PNG (or leave as None)
-LOGO_PATH = None 
+LOGO_PATH = None
+
+# Optional: paths to Poppins fonts for PDF (if you upload them with the app)
+POPPINS_REGULAR_TTF = None  # e.g. "Poppins-Regular.ttf"
+POPPINS_BOLD_TTF = None     # e.g. "Poppins-Bold.ttf"
 
 PRIORITY_ORDER: Dict[Optional[str], int] = {
     "urgent": 1,
@@ -874,6 +902,20 @@ def build_pdf_report(
     from reportlab.lib import colors
     from reportlab.lib.units import mm
 
+    # Optional: register Poppins fonts if paths are provided
+    if POPPINS_REGULAR_TTF or POPPINS_BOLD_TTF:
+        try:
+            from reportlab.pdfbase import pdfmetrics
+            from reportlab.pdfbase.ttfonts import TTFont
+
+            if POPPINS_REGULAR_TTF:
+                pdfmetrics.registerFont(TTFont("Poppins", POPPINS_REGULAR_TTF))
+            if POPPINS_BOLD_TTF:
+                pdfmetrics.registerFont(TTFont("Poppins-Bold", POPPINS_BOLD_TTF))
+        except Exception:
+            # Fallback silently to default fonts if registration fails
+            pass
+
     buffer = io.BytesIO()
 
     doc = SimpleDocTemplate(
@@ -886,11 +928,15 @@ def build_pdf_report(
     )
 
     styles = getSampleStyleSheet()
+    # Base font name depending on whether Poppins is registered
+    base_font = "Poppins" if "Poppins" in styles["Normal"].fontName or POPPINS_REGULAR_TTF else "Helvetica"
+    base_bold = "Poppins-Bold" if POPPINS_BOLD_TTF else "Helvetica-Bold"
+
     styles.add(
         ParagraphStyle(
             name="EchtTitle",
             parent=styles["Heading1"],
-            fontName="Helvetica-Bold",
+            fontName=base_bold,
             fontSize=24,
             leading=28,
             textColor=colors.white,
@@ -901,6 +947,7 @@ def build_pdf_report(
         ParagraphStyle(
             name="EchtSubtitle",
             parent=styles["BodyText"],
+            fontName=base_font,
             fontSize=11,
             leading=14,
             textColor=colors.HexColor("#e5e7eb"),
@@ -911,6 +958,7 @@ def build_pdf_report(
         ParagraphStyle(
             name="EchtSection",
             parent=styles["Heading2"],
+            fontName=base_bold,
             fontSize=15,
             leading=18,
             textColor=colors.HexColor("#0f172a"),
@@ -922,6 +970,7 @@ def build_pdf_report(
         ParagraphStyle(
             name="Muted",
             parent=styles["BodyText"],
+            fontName=base_font,
             textColor=colors.HexColor("#6b7280"),
             fontSize=8.5,
         )
@@ -930,6 +979,7 @@ def build_pdf_report(
         ParagraphStyle(
             name="Small",
             parent=styles["BodyText"],
+            fontName=base_font,
             fontSize=9,
             leading=11,
         )
@@ -1041,9 +1091,9 @@ def build_pdf_report(
             [
                 ("BACKGROUND", (0, 0), (-1, 0), dark_bg),
                 ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTNAME", (0, 0), (-1, 0), base_bold),
                 ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
-                ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+                ("FONTNAME", (0, 1), (-1, -1), base_font),
                 ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.white]),
                 ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#e5e7eb")),
                 ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e5e7eb")),
@@ -1147,7 +1197,7 @@ def build_pdf_report(
                 [
                     ("BACKGROUND", (0, 0), (-1, 0), dark_bg),
                     ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTNAME", (0, 0), (-1, 0), base_bold),
                     ("FONTSIZE", (0, 0), (-1, 0), 9),
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
                     ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.white]),
@@ -1278,7 +1328,7 @@ def build_pdf_report(
                     [
                         ("BACKGROUND", (0, 0), (-1, 0), dark_bg),
                         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                        ("FONTNAME", (0, 0), (-1, 0), base_bold),
                         ("FONTSIZE", (0, 0), (-1, 0), 8),
                         ("VALIGN", (0, 0), (-1, -1), "TOP"),
                         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.white]),
@@ -1351,7 +1401,7 @@ def build_pdf_report(
                 [
                     ("BACKGROUND", (0, 0), (-1, 0), header_bg),
                     ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTNAME", (0, 0), (-1, 0), base_bold),
                     ("ALIGN", (0, 0), (-1, 0), "CENTER"),
                     ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.white]),
                     ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#e5e7eb")),
@@ -1429,7 +1479,7 @@ def build_pdf_report(
                     [
                         ("BACKGROUND", (0, 0), (-1, 0), dark_bg),
                         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                        ("FONTNAME", (0, 0), (-1, 0), base_bold),
                         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.white]),
                         ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#e5e7eb")),
                         ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e5e7eb")),
@@ -1490,7 +1540,7 @@ def build_pdf_report(
                 [
                     ("BACKGROUND", (0, 0), (-1, 0), dark_bg),
                     ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTNAME", (0, 0), (-1, 0), base_bold),
                     ("ALIGN", (0, 0), (0, -1), "CENTER"),
                     ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.white]),
                     ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#e5e7eb")),
